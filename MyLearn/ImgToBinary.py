@@ -1,3 +1,6 @@
+#!user/bin/python3
+# _*_ coding:utf-8 _*_
+# author TingXiao-UI
 import numpy as np
 import os
 from PIL import Image
