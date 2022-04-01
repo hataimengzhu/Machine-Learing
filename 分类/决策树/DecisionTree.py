@@ -1,3 +1,6 @@
+#!user/bin/python3
+# _*_ coding:utf-8 _*_
+# author TingXiao-UI
 from math import log
 import copy
 import matplotlib.pyplot as plt
