@@ -26,6 +26,7 @@ class Regress:
         self.preY = None#预测值
         self.Loss = []#记录每次迭代后的代价
         self.LossList = []#用于平方误差与log(λ)的关系图
+        self.iters = 0
     # 评估函数：计算预测值和真实值的匹配程度:相关系数
     def evaluation(self,model):
         if self.preY is not None:
@@ -136,8 +137,7 @@ class Regress:
         self.PreRC = np.mat(self.PreRC)
         self.preY = np.multiply(inX,self.PreRC).sum(1)#每个样本点的预测值集合
     # 梯度下降+坐标下降：适用于数据集较大，需要迭代求出最终的回归系数W
-    def GD_CD(self, model, maxIters=1000, alpha_int=0.01):  #model='梯度下降'/'坐标下降' maxIters：最大迭代次数,alpha：学习率
-        print(model)
+    def GD_CD(self, model, maxIters=1000, alpha_int=1e-3):  #model='梯度下降'/'坐标下降' maxIters：最大迭代次数,alpha：学习率
         def costs(rc):  # 代价函数：平方误差
             return (self.Y - self.X * rc).T * (self.Y - self.X * rc)
         def run():
@@ -147,7 +147,7 @@ class Regress:
             while True:
                 iters += 1
                 oldLoss = costs(self.RC)[0, 0]
-                # alpha = alpha_int
+                alpha = alpha_int
                 RC = copy.deepcopy(self.RC)
                 if model[0]=='梯度下降':#按照梯度方向更新回归系数
                     if model[1]=='批量梯度下降':#每次迭代先依据全体样本的误差结果更新回归系数
@@ -156,9 +156,9 @@ class Regress:
                         #     alpha = alpha_int * (1.0 + j + iters)
                         #     RC[j] = RC[j] - alpha / self.M * (self.X * RC - self.Y).T * self.X[:, j]
                         # 计算回归系数方式：都计算完后在更新
-                        alpha = alpha_int*(1.0+iters)
+                        alpha = alpha_int*(1.0+iters)/self.M#
                         error=self.X * RC - self.Y#误差:全样本
-                        RC = RC- alpha/self.M*(self.X.T*error)# rc-alpha/len*(m*[n*1])
+                        RC = RC- alpha*(self.X.T*error)# rc-alpha/len*(m*[n*1])
                     elif model[1]=='随机梯度下降':#每次迭代先依据某个样本的误差结果更新回归系数
                         for i in range(self.M):
                             alpha = alpha_int*(1.0+i+iters)
@@ -196,10 +196,46 @@ class Regress:
                     print('迭代次数：', iters, '代价：', newLoss)
                 else:#若大于，则说明跳过了局部最优解，退出
                     break
-                if np.abs(newLoss - oldLoss) < 1e-6 or iters >= maxIters:#变化不大或超过最大迭代次数则退出
+                if np.abs(newLoss - oldLoss) < 1e-3 or iters >= maxIters:#变化不大或超过最大迭代次数则退出
                     break
                 #***************动态显示*****************
                 # self.draw(True)
+                self.iters+=1
+                fig = plt.figure(1)
+                #最大化显示
+                manager = plt.get_current_fig_manager()
+                manager.window.showMaximized()
+
+                plt.ion()  # 动态显示
+                plt.clf()  # 清屏
+
+                left = fig.add_subplot(121)
+                left.set_xlabel('X')
+                left.set_ylabel('Y')
+                left.set_title('回归')
+                left.scatter(self.X[:, 0].A, self.Y.A, s=1)  # 绘制散点
+                # 为什么需要排序？因为plot默认是顺序绘制，当点都在一条直线上的时候，重叠在一起，看不出来
+                # 当点不在一条直线上的时候，
+                srtInd = self.X[:, 0].argsort(0).T.tolist()[0]  # 排序，返回索引值
+                xSort = self.X[srtInd][:, 0]
+                left.plot(xSort, self.preY[srtInd], 'r')  # 绘制拟合直线
+
+                ax1 = fig.add_subplot(122)
+                # 权重与迭代次数关系
+                ax1.set_xlabel('迭代次数')
+                ax1.set_ylabel('权重')
+                ax1.set_title('坐标下降:逐项更新参数')
+                ax1.plot(self.RCIters)
+                # 残差与迭代次数关系
+                ax2 = ax1.twinx()
+                ax2.set_ylabel('残差')
+                ax2.set_xlabel('迭代次数')
+                ax2.plot(self.LossList, 'k--')
+                # 保存图片
+                # plt.savefig('./Data/Gif/' + str(self.iters).zfill(3) + '.jpg')
+                plt.show()
+                plt.pause(0.001)
+                plt.ioff()  # 关闭交互模式
         run()
     # 岭回归(L2正则化)+标准方程
     def ridgeRegress(self,model,lamb=0.02,scope=30):#标准方程求解
@@ -235,7 +271,7 @@ class Regress:
             while True:
                 self.preY = self.X * RC
                 oldLoss = costs(RC)[0, 0]
-                for j in range(self.N):
+                for j in range(self.N):#坐标下降+次梯度
                     RCcut,Xcut = copy.deepcopy(RC),copy.deepcopy(self.X)#复制，防止改变原对象
                     RCcut = np.delete(RCcut,j,axis=0)
                     Xcut = np.delete(Xcut, j, axis=1)
@@ -337,7 +373,7 @@ class Regress:
         else:
             fun(lamb)
     # 前向逐步回归:向前选择
-    def forwardRegress(self,maxIters=1000,step=0.005):
+    def forwardRegress(self,maxIters=1000,step=0.1):
         def costs(rc):  # 代价函数：平方误差
             return (self.Y - self.X * rc).T * (self.Y - self.X * rc)
         def fun():
@@ -360,11 +396,47 @@ class Regress:
                 self.RC = RC
                 self.preY = self.X * RC  # 计算当前回归系数下的预测值
                 newLoss = costs(RC)[0, 0]
-                if np.abs(newLoss - oldLoss) < 1e-6:#变化不大则退出
+                self.LossList.append(np.linalg.norm(newLoss))  # 记录每次迭代后的代价
+                if np.abs(newLoss - oldLoss) < 1e-3:#变化不大则退出
+                    print(self.RC)
                     break
-                iters += 1
-                print('迭代次数：',iters,'平方误差：',costs(self.RC)[0,0])
+                self.iters += 1
+                print('迭代次数：',self.iters,'平方误差：',costs(self.RC)[0,0])
                 # self.draw(True)
+                fig = plt.figure(1)
+                # 最大化显示
+                manager = plt.get_current_fig_manager()
+                manager.window.showMaximized()
+
+                plt.ion()  # 动态显示
+                plt.clf()  # 清屏
+
+                left = fig.add_subplot(121)
+                left.set_xlabel('X')
+                left.set_ylabel('Y')
+                left.set_title('回归')
+                left.scatter(self.X[:, 0].A, self.Y.A, s=1)  # 绘制散点
+                # 当点不在一条直线上的时候，
+                srtInd = self.X[:, 0].argsort(0).T.tolist()[0]  # 排序，返回索引值
+                xSort = self.X[srtInd][:, 0]
+                left.plot(xSort, self.preY[srtInd], 'r')  # 绘制拟合直线
+
+                ax1 = fig.add_subplot(122)
+                # 权重与迭代次数关系
+                ax1.set_xlabel('迭代次数')
+                ax1.set_ylabel('权重')
+                ax1.set_title('前向回归:逐项更新参数，步长:{}'.format(step))
+                ax1.plot(self.RCIters)
+                # 残差与迭代次数关系
+                ax2 = ax1.twinx()
+                ax2.set_ylabel('残差')
+                ax2.set_xlabel('迭代次数')
+                ax2.plot(self.LossList, 'k--')
+                # 保存图片
+                # plt.savefig('./Data/Gif/' + str(self.iters).zfill(3) + '.jpg')
+                plt.show()
+                plt.pause(0.001)
+                plt.ioff()  # 关闭交互模式
         fun()
     # 后退逐步回归：
     def backwardRegress(self):
@@ -396,14 +468,13 @@ class Regress:
                 # self.draw(True)
         fun()
     # 逐步回归
-    def stepwiseRegress(self,step=1e-3):
+    def stepwiseRegress(self,step=0.001):
         def costs(rc):  # 代价函数：平方误差
             return (self.Y - self.X * rc).T * (self.Y - self.X * rc)
         def fun():
             RC = np.mat(np.zeros((self.N, 1)))  #
             minLoss = np.inf  # 代价
             RCtmp = np.mat(np.zeros((self.N, 1)))
-            iters = 0
             while True:
                 oldLoss = costs(RC)[0,0]
                 for j in range(self.N):
@@ -421,8 +492,6 @@ class Regress:
                             minLoss = testLoss
                             RCtmp = FRCtest if sign !=0 else BRCtest
                     RC = RCtmp
-
-                print(RC)
                 self.RC = RC
                 self.preY = self.X * RC  # 计算当前回归系数下的预测值
                 self.RCIters.append(sum(self.RC.tolist(), []))
@@ -430,13 +499,105 @@ class Regress:
                 newLoss = costs(RC)[0, 0]
                 if np.abs(newLoss - oldLoss) < 1e-6:#变化不大则退出
                     break
-                iters += 1
-                print('迭代次数：',iters,'平方误差：',costs(self.RC)[0,0])
+                self.iters += 1
+                print('迭代次数：',self.iters,'平方误差：',costs(self.RC)[0,0])
                 # self.draw(True)
+                #动态演示
+                fig = plt.figure(1)
+                # 最大化显示
+                manager = plt.get_current_fig_manager()
+                manager.window.showMaximized()
+                plt.ion()  # 动态显示
+                plt.clf()  # 清屏
+
+                left = fig.add_subplot(121)
+                left.set_xlabel('X')
+                left.set_ylabel('Y')
+                left.set_title('回归')
+                left.scatter(self.X[:, 0].A, self.Y.A, s=1)  # 绘制散点
+                srtInd = self.X[:, 0].argsort(0).T.tolist()[0]  # 排序，返回索引值
+                xSort = self.X[srtInd][:, 0]
+                left.plot(xSort, self.preY[srtInd], 'r')  # 绘制拟合直线
+
+                ax1 = fig.add_subplot(122)
+                # 权重与迭代次数关系
+                ax1.set_xlabel('迭代次数')
+                ax1.set_ylabel('权重')
+                ax1.set_title('逐步回归:逐项更新参数,步长：{}'.format(step))
+                ax1.plot(self.RCIters)
+                # 残差与迭代次数关系
+                ax2 = ax1.twinx()
+                ax2.set_ylabel('残差')
+                ax2.set_xlabel('迭代次数')
+                ax2.plot(self.LossList, 'k--')
+                # 保存图片
+                # plt.savefig('./Data/Gif/' + str(self.iters).zfill(3) + '.jpg')
+                plt.show()
+                plt.pause(0.001)
+                plt.ioff()  # 关闭交互模式
+
         fun()
     #最小角回归
-    def LAR(self):
-        pass
+    def LAR(self,step=0.2,maxIter=300):
+        #回归系数初始化
+        m,n = self.oraX.shape
+        self.RC=np.mat([0.0]*n).T#n*1
+        while True:
+            self.iters+=1
+            #计算残差
+            loss = self.Y-self.oraX*self.RC
+            #计算所有特征向量与残差余弦相似度
+            a=self.oraX.T*loss/np.linalg.norm(loss)
+            b=np.mat(1/np.linalg.norm(self.oraX,axis=0)).T
+            cosec = np.multiply(a,b)
+            #寻找最大相关的特征向量
+            # id = np.argmax(abs(cosec))#同时考虑正负相关强度
+            id = np.argmax(cosec)#只考虑正相关
+            corrMax = cosec[id][0,0]
+            #更新权重系数
+            # buchang = step*corrMax/abs(corrMax)#固定步长绝对值大小
+            buchang = step*corrMax#不固定步长绝对值大小
+            self.RC[id] += buchang
+            self.RCIters.extend(self.RC.T.tolist())
+            #停止迭代条件：
+            newloss = self.Y-self.oraX*self.RC
+            self.LossList.append(np.linalg.norm(newloss))  # 记录每次迭代后的代价
+            self.preY = self.oraX * self.RC  # 计算当前回归系数下的预测值
+            if np.linalg.norm(newloss-loss)<1e-3 or self.iters>maxIter:
+                print(self.RC)
+                break
+            # 动态显示
+            # fig=plt.figure(1)
+            # # 最大化显示
+            # manager = plt.get_current_fig_manager()
+            # manager.window.showMaximized()
+            # plt.ion()  # 动态显示
+            # plt.clf()  # 清屏
+            # left = fig.add_subplot(121)
+            # left.set_xlabel('X')
+            # left.set_ylabel('Y')
+            # left.set_title('回归')
+            # left.scatter(self.oraX[:, 0].A, self.Y.A, s=1)  # 绘制散点
+            # srtInd = self.oraX[:, 0].argsort(0).T.tolist()[0]  # 排序，返回索引值
+            # xSort = self.oraX[srtInd][:, 0]
+            # left.plot(xSort, self.preY[srtInd], 'r')  # 绘制拟合直线
+            #
+            # ax1 = fig.add_subplot(122)
+            # #权重与迭代次数关系
+            # ax1.set_xlabel('迭代次数')
+            # ax1.set_ylabel('权重')
+            # ax1.set_title('最小角回归:逐项更新第'+str(id)+'列参数,步长：{:.5f}'.format(buchang))
+            # ax1.plot(self.RCIters)
+            # #残差与迭代次数关系
+            # ax2 = ax1.twinx()
+            # ax2.set_ylabel('残差')
+            # ax2.set_xlabel('迭代次数')
+            # ax2.plot(self.LossList, 'k--')
+            # # 保存图片
+            # # plt.savefig('./Data/Gif/'+str(self.iters).zfill(3)+'.jpg')
+            # plt.show()
+            # plt.pause(0.001)
+            # plt.ioff()  # 关闭交互模式
 
     def draw(self,show=False):#适用于二维特征数据集绘制
         if show:
@@ -453,6 +614,9 @@ class Regress:
         xSort = self.X[srtInd][:,0]
         plt.plot(xSort, self.preY[srtInd],'r')#绘制拟合直线
         # plt.plot(self.X[:, 0], self.preY, 'r')  # 绘制拟合直线
+
+        #保存图片
+        # plt.savefig('./Data/Gif/'+str(self.iters).zfill(3)+'.jpg')
         plt.show()
 
         # plt.figure(2)
@@ -468,6 +632,7 @@ class Regress:
         # self.RCList = self.RCList.tolist()
         if show:
             plt.pause(0.001)
+            plt.ioff()  # 关闭交互模式
 
 def loadData(fileName,delim='\t'):
     with open(fileName, encoding='utf-8') as file:
@@ -482,32 +647,69 @@ def loadData(fileName,delim='\t'):
 
 if __name__ == '__main__':
     # ******加载数据集**********
-    trainData = 'ex3.txt'  # ex0/horseColicTraining2/abalone/ex00
-    RawDataSet, OutValue = loadData(r'./Data/' + trainData)  # m*n,m*1
-
+    # trainData = 'ex0.txt'  # ex0/horseColicTraining2/abalone/ex00
+    # RawDataSet, OutValue = loadData(r'./Data/' + trainData)  # m*n,m*1
     # tmpData = np.insert(RawDataSet,1,values=OutValue.T,axis=1)
+
+    # from sklearn import datasets
+    # dataset = datasets.load_boston()
+    # RawDataSet = np.mat(dataset.data)
+    # OutValue = np.mat(dataset.target).T
+
+    import pandas as pd
+    # 读取数据
+    target_url = "https://archive.ics.uci.edu/ml/machine-learning-databases/undocumented/connectionist-bench/sonar/sonar.all-data"
+    # 其中header和prefix的作用为在没有列标题时指定列名
+    df = pd.read_csv(target_url, header=None, prefix='V')
+    df['V60'] = df.iloc[:, -1].apply(lambda v: 1.0 if v == 'M' else 0.0)
+    # 数据标准化  并拆分成属性x和标签y
+    norm_df = (df - df.mean()) / df.std()
+    RawDataSet = np.mat(df.values[:, :-1])
+    OutValue = np.mat(df.values[:, -1]).T
+
+
+    # from sklearn import datasets
+    # centers = [[-2, -8], [-1, 7], [6, 5], [9, 8], [0, 2.3]]
+    # RawDataSet, OutValue = datasets.make_blobs(n_samples=300, n_features=2,centers=centers,cluster_std=[0.2, 0.4, 0.6, 0.3, 0.3])
+    # tmpData = np.mat(RawDataSet)
+    #
     # qq = Edge.Edge(tmpData)
-    # qq.margin()
+    # qq.margin()#凸边
+    # qq.concave()# 凸边凹化
     # qq.display()
+
     # ******数据预处理*********
     data = clean.CleanData(RawDataSet, OutValue)  # 实例化
-    data.ascend(3)  # 数据集升维处理:普通高阶/组合高阶,用于多项式回归
+    # data.ascend(3)  # 数据集升维处理:普通高阶/组合高阶,用于多项式回归
     # data.zero_centered('all')# 中心化
-    # data.z_score('all')#标准正态分布
+    data.z_score('all')#标准正态分布
     # data.normData('all')  # 归一化
-    # RawDataSet, OutValue= data.X, data.Y
+    RawDataSet, OutValue= data.X, data.Y
     #********回归*************
     xx = Regress(RawDataSet, OutValue)#实例化
-    # xx.standRegress()#标准方程
-    # xx.polynomialRegress(6)#多项式线性回归->特征升维+标准方程
-    # xx.LWLRegress()#局部加权线性回归+标准方程
-    xx.GD_CD(model=['坐标下降'])#['梯度下降','批量梯度下降'/'随机梯度下降/小批量梯度下降','线性回归'/'逻辑回归']/['坐标下降''线性回归'/'逻辑回归']+迭代
-    # xx.forwardRegress()#前向逐步回归+迭代
-    # xx.backwardRegress()#后退逐步回归+迭代
-    # xx.stepwiseRegress()#逐步回归+迭代
-    # xx.lassoRegress(model=True)#lasso回归:坐标轴下降+次梯度+迭代,model:是否遍历多个λ来观察回归系数与log(λ)关系
-    # xx.ridgeRegress(model=True)#岭回归+标准方程，model:是否遍历多个λ来观察回归系数与log(λ)关系
-    # xx.elasticNetRegress(model=True)#弹性网络回归+迭代
-    xx.evaluation('回归系数、平方误差与log(λ)关系')#相关性、,平方误差、回归系数与log(λ)关系、回归系数与迭代次数关系、平方误差与log(λ)关系
-    xx.evaluation('平方误差、回归系数与迭代次数关系')
-    xx.draw()
+    # 标准方程
+    # xx.standRegress()
+    # 多项式线性回归->特征升维+标准方程
+    # xx.polynomialRegress(6)
+    # 局部加权线性回归+标准方程
+    # xx.LWLRegress()
+    # ['梯度下降','批量梯度下降'/'随机梯度下降/小批量梯度下降','线性回归'/'逻辑回归']/['坐标下降''线性回归'/'逻辑回归']+迭代
+    # xx.GD_CD(model=['坐标下降'])
+    # 前向逐步回归+迭代
+    # xx.forwardRegress()
+    # 后退逐步回归+迭代
+    # xx.backwardRegress()
+    # 逐步回归+迭代
+    # xx.stepwiseRegress()
+    # lasso回归:坐标轴下降+次梯度+迭代,model:是否遍历多个λ来观察回归系数与log(λ)关系
+    # xx.lassoRegress(model=True)
+    # 岭回归+标准方程，model:是否遍历多个λ来观察回归系数与log(λ)关系
+    # xx.ridgeRegress(model=True)
+    # 弹性网络回归+迭代
+    # xx.elasticNetRegress(model=True)
+    # xx.draw()
+    #最小角回归-非常适用于样本数<特征数
+    xx.LAR()
+
+    # xx.evaluation('回归系数、平方误差与log(λ)关系')#相关性、,平方误差、回归系数与log(λ)关系、回归系数与迭代次数关系、平方误差与log(λ)关系
+    # xx.evaluation('平方误差、回归系数与迭代次数关系')
